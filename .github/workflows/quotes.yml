@@ -44,5 +44,6 @@ jobs:
             echo "No quote changes"
           else
             git commit -m "data: refresh five-minute quotes"
+            git pull --rebase origin main
             git push
           fi
