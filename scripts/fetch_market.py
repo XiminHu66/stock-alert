@@ -268,11 +268,26 @@ def option_snapshot(
     """Fetch several nearby expirations and keep a per-expiry trend history."""
     try:
         today = datetime.now(timezone.utc).date()
-        candidates = [
+        future_candidates = [
             (datetime.strptime(value, "%Y-%m-%d").date(), value)
             for value in list(ticker.options or [])
         ]
-        candidates = [item for item in candidates if item[0] >= today][:max_expirations]
+        future_candidates = [item for item in future_candidates if item[0] >= today]
+        targets = (0, 21) if max_expirations == 2 else (0, 7, 21, 45)[:max_expirations]
+        candidates: list[tuple[Any, str]] = []
+        for minimum_dte in targets:
+            match = next(
+                (item for item in future_candidates if (item[0] - today).days >= minimum_dte and item not in candidates),
+                None,
+            )
+            if match:
+                candidates.append(match)
+        for item in future_candidates:
+            if len(candidates) >= max_expirations:
+                break
+            if item not in candidates:
+                candidates.append(item)
+        candidates.sort()
         if not candidates:
             return None
 
