@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a0d12">
+  <meta name="description" content="自选股、新闻、期权活跃度、技术分析与价格区间提醒。">
+  <title>Stock Alert · 交易观察台</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Stock Alert 首页">
+        <span class="brand-mark">S/A</span>
+        <span><b>Stock Alert</b><small>MARKET DECISION DESK</small></span>
+      </a>
+      <div class="top-status">
+        <span id="marketBadge" class="market-badge"><i></i> 检查市场状态</span>
+        <span id="updatedAt" class="updated-at">等待数据</span>
+      </div>
+      <div class="top-actions">
+        <button id="notifyButton" class="icon-button" type="button" title="启用浏览器提醒" aria-label="启用浏览器提醒">◌</button>
+        <button id="themeButton" class="icon-button" type="button" title="切换主题" aria-label="切换主题">☼</button>
+        <button id="refreshButton" class="refresh-button" type="button"><span>↻</span> 刷新</button>
+      </div>
+    </header>
+
+    <aside class="watch-panel">
+      <div class="panel-heading">
+        <div><span class="eyebrow">WATCHLIST</span><h2>我的自选</h2></div>
+        <button id="resetWatchlist" class="text-button" type="button">恢复默认</button>
+      </div>
+      <form id="addSymbolForm" class="symbol-form">
+        <label class="sr-only" for="symbolInput">输入股票代码</label>
+        <input id="symbolInput" autocomplete="off" maxlength="12" placeholder="输入代码，如 AMD">
+        <button type="submit">＋</button>
+      </form>
+      <div id="watchlist" class="watchlist" aria-live="polite"></div>
+      <div class="watch-footer">
+        <span><i class="dot buy"></i>买入提醒</span>
+        <span><i class="dot sell"></i>卖出提醒</span>
+        <span><i class="dot stale"></i>数据陈旧</span>
+      </div>
+    </aside>
+
+    <main class="dashboard">
+      <section id="alertBanner" class="alert-banner" hidden>
+        <div><span id="alertIcon">!</span><strong id="alertTitle">价格提醒</strong></div>
+        <p id="alertText"></p>
+        <button id="dismissAlert" type="button" aria-label="关闭提醒">×</button>
+      </section>
+
+      <section class="hero-card card">
+        <div class="quote-head">
+          <div>
+            <div class="symbol-line"><h1 id="quoteSymbol">—</h1><span id="quoteExchange" class="chip">—</span></div>
+            <p id="quoteName">选择一个标的</p>
+          </div>
+          <div class="quote-price-block">
+            <div><span id="quoteCurrency">$</span><strong id="quotePrice">—</strong></div>
+            <span id="quoteChange" class="quote-change">—</span>
+          </div>
+        </div>
+        <div class="chart-toolbar">
+          <div class="period-tabs" role="tablist" aria-label="图表周期">
+            <button data-period="1M" type="button">1M</button>
+            <button data-period="3M" type="button">3M</button>
+            <button data-period="6M" type="button">6M</button>
+            <button data-period="1Y" class="active" type="button">1Y</button>
+          </div>
+          <div class="chart-legend"><span><i class="line price"></i>价格</span><span><i class="line sma"></i>SMA 50</span></div>
+        </div>
+        <div id="chart" class="chart" role="img" aria-label="历史价格图表">
+          <div class="chart-empty">等待历史数据</div>
+        </div>
+        <div class="quote-stats">
+          <div><span>前收</span><strong id="statPrev">—</strong></div>
+          <div><span>52周区间</span><strong id="stat52">—</strong></div>
+          <div><span>年化波动</span><strong id="statVol">—</strong></div>
+          <div><span>ATR 14</span><strong id="statAtr">—</strong></div>
+        </div>
+      </section>
+
+      <section class="analysis-card card">
+        <div class="section-heading">
+          <div><span class="eyebrow">TECHNICAL MODEL</span><h2>技术分析</h2></div>
+          <button id="methodButton" class="text-button" type="button">查看算法</button>
+        </div>
+        <div class="decision-grid">
+          <div class="signal-box">
+            <span>综合信号</span>
+            <strong id="signalText">等待数据</strong>
+            <div class="confidence"><i id="confidenceBar"></i></div>
+            <small id="confidenceText">置信度 —</small>
+          </div>
+          <div class="range-box buy-range">
+            <span>模型买入观察区</span>
+            <strong id="buyRange">—</strong>
+            <small id="buyDistance">基于支撑位与 ATR</small>
+          </div>
+          <div class="range-box sell-range">
+            <span>模型卖出观察区</span>
+            <strong id="sellRange">—</strong>
+            <small id="sellDistance">基于阻力位与 ATR</small>
+          </div>
+        </div>
+        <div id="indicatorGrid" class="indicator-grid"></div>
+        <div class="analysis-note">
+          <span>模型解读</span>
+          <p id="analysisSummary">加载历史数据后，将根据趋势、动量、波动和支撑阻力生成区间。</p>
+        </div>
+      </section>
+
+      <section class="alert-settings card">
+        <div class="section-heading">
+          <div><span class="eyebrow">PRICE ZONES</span><h2>我的交易区间</h2></div>
+          <span id="rangeStatus" class="save-status">未设置</span>
+        </div>
+        <p class="helper">价格进入任一区间时，对应标的和页面顶部会高亮。设置保存在当前浏览器。</p>
+        <form id="rangeForm" class="range-form">
+          <fieldset>
+            <legend>买入区间</legend>
+            <label>最低价<input id="buyLowInput" inputmode="decimal" type="number" min="0" step="0.01" placeholder="Low"></label>
+            <span>—</span>
+            <label>最高价<input id="buyHighInput" inputmode="decimal" type="number" min="0" step="0.01" placeholder="High"></label>
+          </fieldset>
+          <fieldset>
+            <legend>卖出区间</legend>
+            <label>最低价<input id="sellLowInput" inputmode="decimal" type="number" min="0" step="0.01" placeholder="Low"></label>
+            <span>—</span>
+            <label>最高价<input id="sellHighInput" inputmode="decimal" type="number" min="0" step="0.01" placeholder="High"></label>
+          </fieldset>
+          <div class="range-actions">
+            <button id="useModelRanges" class="secondary-button" type="button">采用模型区间</button>
+            <button class="primary-button" type="submit">保存提醒</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="options-card card side-card">
+        <div class="section-heading">
+          <div><span class="eyebrow">OPTIONS SNAPSHOT</span><h2>期权活跃度</h2></div>
+          <a id="optionsLink" class="text-button" href="#" target="_blank" rel="noopener">查看链 ↗</a>
+        </div>
+        <div id="optionsBody" class="options-body"><div class="empty-state">等待期权数据</div></div>
+      </section>
+
+      <section class="news-card card side-card">
+        <div class="section-heading">
+          <div><span class="eyebrow">LIVE HEADLINES</span><h2>相关新闻</h2></div>
+          <a id="newsLink" class="text-button" href="#" target="_blank" rel="noopener">更多 ↗</a>
+        </div>
+        <div id="newsList" class="news-list"><div class="empty-state">等待新闻数据</div></div>
+      </section>
+
+      <footer class="disclaimer">
+        数据通常延迟 15–30 分钟；期权区为快照而非逐笔成交流。模型仅用于研究与提醒，不构成投资建议。
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="methodDialog" class="method-dialog">
+    <form method="dialog"><button aria-label="关闭">×</button></form>
+    <span class="eyebrow">MODEL NOTES</span>
+    <h2>区间是怎样算出来的？</h2>
+    <p>模型使用近一年日线，组合趋势、动量、波动和历史支撑阻力。它不会预测唯一目标价，而是提供更适合执行的观察区间。</p>
+    <ol>
+      <li><b>趋势：</b>SMA 20/50/200 判断多空排列与价格位置。</li>
+      <li><b>动量：</b>RSI 14 与 MACD 判断超买超卖和动量拐点。</li>
+      <li><b>波动：</b>ATR 14 和布林带决定区间宽度，避免用固定百分比。</li>
+      <li><b>支撑阻力：</b>近期高低点、均线与布林带共同形成候选价位。</li>
+      <li><b>置信度：</b>由样本长度、趋势一致性和指标完整度综合计算。</li>
+    </ol>
+    <p class="dialog-warning">财报、宏观事件和跳空可能让历史技术位立即失效，请结合仓位和止损使用。</p>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
