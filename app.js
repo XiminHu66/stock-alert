@@ -24,7 +24,9 @@ const state = {
   data: { generatedAt: null, symbols: {} },
   period: "1Y",
   analysis: null,
-  dismissedAlert: false
+  dismissedAlert: false,
+  directQuoteAt: null,
+  directQuoteSymbol: null
 };
 
 function readStorage(key, fallback) {
@@ -69,6 +71,8 @@ async function loadMarketData(showFeedback = false) {
     catch (error) { console.warn("Market data source failed", source, error); }
   }
   if (loaded?.symbols) {
+    const directItem = state.directQuoteSymbol ? dataFor(state.directQuoteSymbol) : null;
+    const directCarry = directItem ? { symbol: state.directQuoteSymbol, at: state.directQuoteAt, price: directItem.price, previousClose: directItem.previousClose, change: directItem.change, changePct: directItem.changePct, lastTradeAt: directItem.lastTradeAt, liveSource: directItem.liveSource } : null;
     state.data = loaded;
     let quotes = null;
     for (const source of quoteSources) {
@@ -80,6 +84,9 @@ async function loadMarketData(showFeedback = false) {
         if (state.data.symbols[symbol]) Object.assign(state.data.symbols[symbol], quote);
       });
       state.data.quoteGeneratedAt = quotes.generatedAt;
+    }
+    if (directCarry && new Date(directCarry.at).getTime() > new Date(state.data.quoteGeneratedAt || 0).getTime() && state.data.symbols[directCarry.symbol]) {
+      Object.assign(state.data.symbols[directCarry.symbol], directCarry);
     }
     if (showFeedback) toast("报价与模型已刷新");
   } else if (showFeedback) toast("暂时无法更新，保留已有数据");
@@ -116,13 +123,46 @@ async function fetchCustomSymbol(symbol, showFeedback = true) {
   }
 }
 
+async function fetchLiveSelectedQuote(showFeedback = false) {
+  const symbol = state.selected; const item = dataFor(symbol); if (!symbol || !item) return false;
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m&includePrePost=true&events=div%2Csplits`;
+    const payload = await fetchJson(url, 9000); const result = payload?.chart?.result?.[0]; if (!result) throw new Error("No live quote result");
+    const timestamps = result.timestamp || []; const closes = result.indicators?.quote?.[0]?.close || [];
+    let price = null, lastTradeAt = null;
+    for (let index = Math.min(timestamps.length, closes.length) - 1; index >= 0; index--) {
+      const candidate = finite(closes[index]);
+      if (candidate !== null) { price = candidate; lastTradeAt = new Date(timestamps[index] * 1000).toISOString(); break; }
+    }
+    const meta = result.meta || {}; price ??= finite(meta.regularMarketPrice); if (price === null) throw new Error("No live price");
+    const previousClose = finite(meta.chartPreviousClose) ?? finite(item.previousClose); const change = previousClose === null ? null : price - previousClose;
+    Object.assign(item, { price, previousClose, change, changePct: previousClose ? change / previousClose * 100 : null, lastTradeAt: lastTradeAt || item.lastTradeAt, liveSource: "Yahoo browser chart" });
+    state.directQuoteAt = new Date().toISOString(); state.directQuoteSymbol = symbol;
+    if (state.selected === symbol) { updateMarketStatus(); renderAll(); }
+    if (showFeedback) toast(`${displayFor(symbol)} 当前价已直连刷新`);
+    return true;
+  } catch (error) {
+    console.warn("Direct quote unavailable; using scheduled snapshot", error);
+    if (showFeedback) toast("直连暂不可用，已保留后台快照");
+    return false;
+  }
+}
+
+function ageText(timestamp) {
+  if (!timestamp) return "等待更新";
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(timestamp).getTime()) / 60000));
+  return minutes < 2 ? "刚刚" : `${minutes} 分钟前`;
+}
+
 function updateMarketStatus() {
   const badge = $("marketBadge"); const marketState = state.data.marketState || inferMarketState();
   const open = marketState === "open"; badge.classList.toggle("open", open); badge.innerHTML = `<i></i> ${open ? "美股交易中" : "美股已休市"}`;
-  const timestamp = state.data.quoteGeneratedAt || state.data.generatedAt;
-  if (!timestamp) { $("updatedAt").textContent = "等待报价 · 模型随报价更新"; return; }
-  const date = new Date(timestamp); const ageMinutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
-  $("updatedAt").textContent = `${ageMinutes < 2 ? "报价刚刚更新" : `报价 ${ageMinutes} 分钟前`} · 模型已同步`;
+  const item = dataFor(); const direct = state.directQuoteSymbol === state.selected && state.directQuoteAt;
+  const snapshotAt = item?.fetchedAt || state.data.quoteGeneratedAt || state.data.generatedAt;
+  if (!snapshotAt && !direct) { $("updatedAt").textContent = "等待报价 · 模型随报价更新"; return; }
+  const tradeAt = item?.lastTradeAt || snapshotAt;
+  $("updatedAt").textContent = `行情 ${ageText(tradeAt)} · ${direct ? "浏览器直连" : `后台快照 ${ageText(snapshotAt)}`} · 模型已同步`;
+  $("updatedAt").title = direct ? `直连请求 ${ageText(state.directQuoteAt)}` : "GitHub Actions 自动快照";
 }
 function inferMarketState() {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
@@ -397,11 +437,11 @@ function maybeNotify(kind,item,range) {
 function bindEvents() {
   $("watchlist").addEventListener("click", event => {
     const remove = event.target.closest("[data-remove]"); if (remove) { event.stopPropagation(); removeSymbol(remove.dataset.remove); return; }
-    const button = event.target.closest("[data-symbol]"); if (!button) return; state.selected = button.dataset.symbol; state.dismissedAlert = false; localStorage.setItem(KEYS.selected,state.selected); renderAll(); if(!dataFor()) fetchCustomSymbol(state.selected);
+    const button = event.target.closest("[data-symbol]"); if (!button) return; state.selected = button.dataset.symbol; state.dismissedAlert = false; localStorage.setItem(KEYS.selected,state.selected); renderAll(); if(!dataFor()) fetchCustomSymbol(state.selected).then(()=>fetchLiveSelectedQuote(false)); else fetchLiveSelectedQuote(false);
   });
   $("addSymbolForm").addEventListener("submit", event => { event.preventDefault(); const input=$("symbolInput"); let symbol=input.value.trim().toUpperCase(); if(!symbol)return; if(symbol==="SPX")symbol="^GSPC"; if(symbol==="BTCUSD")symbol="BTC-USD"; if(!state.watchlist.some(item=>item.symbol===symbol))state.watchlist.push({symbol,display:symbol.replace("-USD","USD").replace("^GSPC","SPX"),name:symbol}); state.selected=symbol; input.value=""; writeStorage(KEYS.watchlist,state.watchlist); localStorage.setItem(KEYS.selected,symbol); renderAll(); fetchCustomSymbol(symbol); });
   $("resetWatchlist").addEventListener("click",()=>{state.watchlist=structuredClone(DEFAULT_WATCHLIST);writeStorage(KEYS.watchlist,state.watchlist);renderAll();toast("已恢复 deskboard 默认列表");});
-  $("refreshButton").addEventListener("click",()=>loadMarketData(true));
+  $("refreshButton").addEventListener("click",async()=>{await loadMarketData(false);await fetchLiveSelectedQuote(true);});
   document.querySelectorAll("[data-period]").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll("[data-period]").forEach(node=>node.classList.remove("active"));button.classList.add("active");state.period=button.dataset.period;renderChart(dataFor()?.history||[],state.analysis);}));
   $("rangeForm").addEventListener("submit", event => { event.preventDefault(); const value=id=>finite($(id).value); const range={buyLow:value("buyLowInput"),buyHigh:value("buyHighInput"),sellLow:value("sellLowInput"),sellHigh:value("sellHighInput")}; if([range.buyLow,range.buyHigh,range.sellLow,range.sellHigh].some(v=>v===null)){toast("请完整填写两个价格区间");return;} if(range.buyLow>range.buyHigh||range.sellLow>range.sellHigh){toast("最低价不能高于最高价");return;} state.ranges[state.selected]=range;writeStorage(KEYS.ranges,state.ranges);state.dismissedAlert=false;renderAll();toast("提醒区间已保存"); });
   $("useModelRanges").addEventListener("click",()=>{if(!state.analysis)return; const a=state.analysis; $("buyLowInput").value=a.buyLow.toFixed(2);$("buyHighInput").value=a.buyHigh.toFixed(2);$("sellLowInput").value=a.sellLow.toFixed(2);$("sellHighInput").value=a.sellHigh.toFixed(2);toast("已填入模型区间，点击保存后生效");});
@@ -415,6 +455,7 @@ function removeSymbol(symbol) { if(state.watchlist.length<=1){toast("至少保�
 function init() {
   if (localStorage.getItem(KEYS.theme)==="light") document.body.classList.add("light");
   if (localStorage.getItem(KEYS.notifications)==="on") $("notifyButton").textContent="●";
-  bindEvents(); updateMarketStatus(); renderAll(); loadMarketData(false); setInterval(()=>loadMarketData(false),60*1000);
+  bindEvents(); updateMarketStatus(); renderAll(); loadMarketData(false).then(()=>fetchLiveSelectedQuote(false));
+  setInterval(()=>fetchLiveSelectedQuote(false),60*1000); setInterval(()=>loadMarketData(false),2*60*1000);
 }
 init();
