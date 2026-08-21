@@ -35,7 +35,7 @@ function writeStorage(key, value) { localStorage.setItem(key, JSON.stringify(val
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
-function finite(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
+function finite(value) { if (value === null || value === undefined || value === "") return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
 function fmt(value, digits = 2) { const number = finite(value); return number === null ? "—" : number.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }); }
 function fmtCompact(value) { const number = finite(value); if (number === null) return "—"; return Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(number); }
 function pct(value, digits = 2) { const number = finite(value); return number === null ? "—" : `${number >= 0 ? "+" : ""}${number.toFixed(digits)}%`; }
@@ -261,7 +261,7 @@ function renderEvidence(history, fundamentals) {
     $("backtestNote").textContent = "当前样本不足以形成可靠统计；不会用指标一致度冒充历史胜率。";
   } else {
     const metrics = [
-      ["样本", test.sample, "次独立间隔信号"], ["20日胜率", `${fmt(test.winRate, 0)}%`, "收益大于 0"],
+      ["样本", test.sample, "10日去重信号"], ["20日胜率", `${fmt(test.winRate, 0)}%`, "收益大于 0"],
       ["平均收益", pct(test.averageReturn, 1), `中位数 ${pct(test.medianReturn, 1)}`], ["最差回撤", pct(test.worstDrawdown, 1), "入场后 20 日内"]
     ];
     $("backtestMetrics").innerHTML = metrics.map(([name, value, note]) => `<div><span>${name}</span><strong>${value}</strong><small>${note}</small></div>`).join("");
@@ -347,7 +347,8 @@ function renderOptions(options, spotPrice) {
   const maxOi = Math.max(1, ...profiles.flatMap(row => [finite(row.callOi) || 0, finite(row.putOi) || 0]));
   const profileRows = profiles.map(row => {
     const near = spotPrice && Math.abs(row.strike - spotPrice) === Math.min(...profiles.map(item => Math.abs(item.strike - spotPrice)));
-    return `<div class="oi-row ${near ? "near" : ""}"><span class="oi-number">${fmtCompact(row.callOi)}</span><i class="call-oi" style="width:${clamp((finite(row.callOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><b>${fmt(row.strike, 0)}</b><i class="put-oi" style="width:${clamp((finite(row.putOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><span class="oi-number">${fmtCompact(row.putOi)}</span></div>`;
+    const strikeDigits = Number(row.strike) % 1 ? 1 : 0;
+    return `<div class="oi-row ${near ? "near" : ""}"><span class="oi-number">${fmtCompact(row.callOi)}</span><i class="call-oi" style="width:${clamp((finite(row.callOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><b>${fmt(row.strike, strikeDigits)}</b><i class="put-oi" style="width:${clamp((finite(row.putOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><span class="oi-number">${fmtCompact(row.putOi)}</span></div>`;
   }).join("");
   const levels = [options.putWall, spotPrice, options.maxPain, options.callWall].map(finite).filter(value => value !== null);
   let ladder = "";
