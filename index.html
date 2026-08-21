@@ -20,7 +20,7 @@
       </a>
       <div class="top-status">
         <span id="marketBadge" class="market-badge"><i></i> 检查市场状态</span>
-        <span id="updatedAt" class="updated-at">等待数据</span>
+        <span id="updatedAt" class="updated-at">等待报价 · 模型随报价更新</span>
       </div>
       <div class="top-actions">
         <button id="notifyButton" class="icon-button" type="button" title="启用浏览器提醒" aria-label="启用浏览器提醒">◌</button>
@@ -87,7 +87,7 @@
 
       <section class="analysis-card card">
         <div class="section-heading">
-          <div><span class="eyebrow">TECHNICAL MODEL</span><h2>技术分析</h2></div>
+          <div><span class="eyebrow">TECHNICAL MODEL</span><h2>技术分析 <em class="live-model-badge">随报价更新</em></h2></div>
           <button id="methodButton" class="text-button" type="button">查看算法</button>
         </div>
         <div class="decision-grid">
@@ -97,12 +97,12 @@
             <div class="confidence"><i id="confidenceBar"></i></div>
             <small id="confidenceText">置信度 —</small>
           </div>
-          <div class="range-box buy-range">
+          <div id="modelBuyBox" class="range-box buy-range">
             <span>模型买入观察区</span>
             <strong id="buyRange">—</strong>
             <small id="buyDistance">基于支撑位与 ATR</small>
           </div>
-          <div class="range-box sell-range">
+          <div id="modelSellBox" class="range-box sell-range">
             <span>模型卖出观察区</span>
             <strong id="sellRange">—</strong>
             <small id="sellDistance">基于阻力位与 ATR</small>

@@ -15,6 +15,7 @@ const KEYS = {
   notifications: "stock_alert_notifications_v1"
 };
 const RAW_DATA = "https://raw.githubusercontent.com/XiminHu66/stock-alert/main/data/market.json";
+const RAW_QUOTES = "https://raw.githubusercontent.com/XiminHu66/stock-alert/main/data/quotes.json";
 const $ = id => document.getElementById(id);
 const state = {
   watchlist: readStorage(KEYS.watchlist, DEFAULT_WATCHLIST),
@@ -59,7 +60,9 @@ async function fetchJson(url, timeout = 12000) {
 
 async function loadMarketData(showFeedback = false) {
   $("refreshButton").classList.add("loading");
-  const sources = [`${RAW_DATA}?t=${Date.now()}`, `data/market.json?t=${Date.now()}`];
+  const stamp = Date.now();
+  const sources = [`${RAW_DATA}?t=${stamp}`, `data/market.json?t=${stamp}`];
+  const quoteSources = [`${RAW_QUOTES}?t=${stamp}`, `data/quotes.json?t=${stamp}`];
   let loaded = null;
   for (const source of sources) {
     try { loaded = await fetchJson(source); if (loaded?.symbols) break; }
@@ -67,7 +70,18 @@ async function loadMarketData(showFeedback = false) {
   }
   if (loaded?.symbols) {
     state.data = loaded;
-    if (showFeedback) toast("数据已刷新");
+    let quotes = null;
+    for (const source of quoteSources) {
+      try { quotes = await fetchJson(source); if (quotes?.symbols) break; }
+      catch (error) { console.warn("Quote source failed", source, error); }
+    }
+    if (quotes?.symbols) {
+      Object.entries(quotes.symbols).forEach(([symbol, quote]) => {
+        if (state.data.symbols[symbol]) Object.assign(state.data.symbols[symbol], quote);
+      });
+      state.data.quoteGeneratedAt = quotes.generatedAt;
+    }
+    if (showFeedback) toast("报价与模型已刷新");
   } else if (showFeedback) toast("暂时无法更新，保留已有数据");
   $("refreshButton").classList.remove("loading");
   updateMarketStatus(); renderAll();
@@ -105,9 +119,10 @@ async function fetchCustomSymbol(symbol, showFeedback = true) {
 function updateMarketStatus() {
   const badge = $("marketBadge"); const marketState = state.data.marketState || inferMarketState();
   const open = marketState === "open"; badge.classList.toggle("open", open); badge.innerHTML = `<i></i> ${open ? "美股交易中" : "美股已休市"}`;
-  if (!state.data.generatedAt) { $("updatedAt").textContent = "等待自动数据"; return; }
-  const date = new Date(state.data.generatedAt); const ageMinutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
-  $("updatedAt").textContent = ageMinutes < 2 ? "刚刚更新" : `${ageMinutes} 分钟前更新`;
+  const timestamp = state.data.quoteGeneratedAt || state.data.generatedAt;
+  if (!timestamp) { $("updatedAt").textContent = "等待报价 · 模型随报价更新"; return; }
+  const date = new Date(timestamp); const ageMinutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+  $("updatedAt").textContent = `${ageMinutes < 2 ? "报价刚刚更新" : `报价 ${ageMinutes} 分钟前`} · 模型已同步`;
 }
 function inferMarketState() {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
@@ -128,12 +143,21 @@ function alertState(symbol, item) {
   return null;
 }
 
+function modelZoneState(item) {
+  const price = finite(item?.price); const analysis = calculateAnalysis(item?.history || [], price);
+  if (price === null || !analysis) return null;
+  if (price >= analysis.buyLow && price <= analysis.buyHigh) return "buy";
+  if (price >= analysis.sellLow && price <= analysis.sellHigh) return "sell";
+  return null;
+}
+
 function renderWatchlist() {
   $("watchlist").innerHTML = state.watchlist.map(item => {
-    const market = dataFor(item.symbol); const change = finite(market?.changePct); const alert = alertState(item.symbol, market);
-    return `<button class="watch-item ${item.symbol === state.selected ? "active" : ""} ${alert ? `alert-${alert}` : ""}" data-symbol="${escapeHtml(item.symbol)}" type="button">
+    const market = dataFor(item.symbol); const change = finite(market?.changePct); const alert = alertState(item.symbol, market); const modelZone = modelZoneState(market);
+    const zoneLabel = alert ? `自定${alert === "buy" ? "买" : "卖"}` : modelZone ? `模型${modelZone === "buy" ? "买" : "卖"}` : "";
+    return `<button class="watch-item ${item.symbol === state.selected ? "active" : ""} ${modelZone ? `model-${modelZone}` : ""} ${alert ? `alert-${alert}` : ""}" data-symbol="${escapeHtml(item.symbol)}" type="button">
       <span class="ticker-avatar">${escapeHtml(item.display.slice(0,4))}</span>
-      <span class="ticker-id"><strong>${escapeHtml(item.display)}</strong><small>${escapeHtml(item.name || item.symbol)}</small></span>
+      <span class="ticker-id"><strong>${escapeHtml(item.display)} ${zoneLabel ? `<em class="zone-tag ${alert ? "custom" : ""}">${zoneLabel}</em>` : ""}</strong><small>${escapeHtml(item.name || item.symbol)}</small></span>
       <span class="ticker-quote"><strong>${market ? `${currencyMark(market)}${fmt(market.price)}` : "—"}</strong><small class="${change >= 0 ? "positive" : "negative"}">${pct(change)}</small></span>
       <span class="remove-symbol" data-remove="${escapeHtml(item.symbol)}">×</span>
     </button>`;
@@ -185,12 +209,14 @@ function calculateAnalysis(history, livePrice) {
   const high20 = Math.max(...highs.slice(-20)), low20 = Math.min(...lows.slice(-20)); const high60 = Math.max(...highs.slice(-60)), low60 = Math.min(...lows.slice(-60));
   const high52 = Math.max(...highs.slice(-252)), low52 = Math.min(...lows.slice(-252));
   const returns = closes.slice(-252).slice(1).map((value,index) => Math.log(value / closes.slice(-252)[index])); const annualVol = standardDeviation(returns) * Math.sqrt(252) * 100;
-  const supports = [sma20,sma50,sma200,bbLower,low20,low60].filter(value => Number.isFinite(value) && value <= price*1.015 && value >= price*.65);
-  const resistances = [bbUpper,high20,high60,high52,price+2*atr14].filter(value => Number.isFinite(value) && value >= price*.985 && value <= price*1.45);
+  const supports = [sma20,sma50,sma200,bbLower,low20,low60].filter(value => Number.isFinite(value) && value <= price*1.04 && value >= price*.65);
+  const resistances = [bbUpper,high20,high60,high52,price+2*atr14].filter(value => Number.isFinite(value) && value >= price*.96 && value <= price*1.45);
   let support = median(supports) ?? price-1.5*atr14; let resistance = median(resistances) ?? price+2*atr14;
   if (sma50 && price > sma50 && sma20 > sma50) support = Math.max(support, Math.min(sma20,price));
-  const buyHigh = Math.min(price*.997, support+.35*atr14); const buyLow = Math.max(price*.55, Math.min(buyHigh-.25*atr14, support-.75*atr14));
-  const sellLow = Math.max(price*1.003, resistance-.35*atr14); const sellHigh = Math.max(sellLow+.25*atr14, resistance+.75*atr14);
+  // Zones are centered on historical support/resistance. Do not anchor their edge
+  // to the live price, otherwise the price can never actually enter the zone.
+  const buyLow = Math.max(price*.55, support-.75*atr14); const buyHigh = support+.45*atr14;
+  const sellLow = resistance-.35*atr14; const sellHigh = resistance+.75*atr14;
   let trendScore = 0; if (sma20) trendScore += price > sma20 ? 1 : -1; if (sma50) trendScore += price > sma50 ? 1 : -1; if (sma200) trendScore += price > sma200 ? 1 : -1; if (sma20 && sma50) trendScore += sma20 > sma50 ? 1 : -1;
   let signal = "等待"; let tone = "neutral";
   if (price >= sellLow || rsi14 >= 72) { signal = "偏向止盈"; tone = "sell"; }
@@ -208,13 +234,18 @@ function calculateAnalysis(history, livePrice) {
 
 function renderAnalysis(analysis) {
   if (!analysis) {
+    $("modelBuyBox").classList.remove("active-zone"); $("modelSellBox").classList.remove("active-zone");
     $("signalText").textContent = "数据不足"; $("confidenceBar").style.width = "0"; $("confidenceText").textContent = "至少需要 20 个交易日";
     $("buyRange").textContent = $("sellRange").textContent = "—"; $("indicatorGrid").innerHTML = `<div class="empty-state">等待历史数据</div>`; $("analysisSummary").textContent = "当前标的尚无足够历史数据。"; return;
   }
   $("signalText").textContent = analysis.signal; $("signalText").className = analysis.tone === "buy" ? "positive" : analysis.tone === "sell" ? "negative" : "";
   $("confidenceBar").style.width = `${analysis.confidence}%`; $("confidenceText").textContent = `模型置信度 ${analysis.confidence}%`;
   $("buyRange").textContent = `$${fmt(analysis.buyLow)} – ${fmt(analysis.buyHigh)}`; $("sellRange").textContent = `$${fmt(analysis.sellLow)} – ${fmt(analysis.sellHigh)}`;
-  $("buyDistance").textContent = `距现价 ${pct((analysis.buyHigh/analysis.price-1)*100,1)}`; $("sellDistance").textContent = `距现价 ${pct((analysis.sellLow/analysis.price-1)*100,1)}`;
+  $("modelBuyBox").classList.toggle("active-zone", analysis.price >= analysis.buyLow && analysis.price <= analysis.buyHigh);
+  $("modelSellBox").classList.toggle("active-zone", analysis.price >= analysis.sellLow && analysis.price <= analysis.sellHigh);
+  const inBuyZone = analysis.price >= analysis.buyLow && analysis.price <= analysis.buyHigh; const inSellZone = analysis.price >= analysis.sellLow && analysis.price <= analysis.sellHigh;
+  $("buyDistance").textContent = inBuyZone ? "当前已进入模型区间" : `距区间上沿 ${pct((analysis.buyHigh/analysis.price-1)*100,1)}`;
+  $("sellDistance").textContent = inSellZone ? "当前已进入模型区间" : `距区间下沿 ${pct((analysis.sellLow/analysis.price-1)*100,1)}`;
   const indicators = [
     ["SMA 20",fmt(analysis.sma20),analysis.price>analysis.sma20?"价格在上":"价格在下"], ["SMA 50",fmt(analysis.sma50),analysis.price>analysis.sma50?"价格在上":"价格在下"],
     ["SMA 200",fmt(analysis.sma200),analysis.sma200?analysis.price>analysis.sma200?"长期偏多":"长期偏弱":"样本不足"], ["RSI 14",fmt(analysis.rsi14,1),analysis.rsi14>70?"偏热":analysis.rsi14<35?"偏冷":"中性"],
@@ -302,6 +333,6 @@ function removeSymbol(symbol) { if(state.watchlist.length<=1){toast("至少保�
 function init() {
   if (localStorage.getItem(KEYS.theme)==="light") document.body.classList.add("light");
   if (localStorage.getItem(KEYS.notifications)==="on") $("notifyButton").textContent="●";
-  bindEvents(); updateMarketStatus(); renderAll(); loadMarketData(false); setInterval(()=>loadMarketData(false),15*60*1000);
+  bindEvents(); updateMarketStatus(); renderAll(); loadMarketData(false); setInterval(()=>loadMarketData(false),60*1000);
 }
 init();

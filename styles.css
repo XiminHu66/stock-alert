@@ -125,12 +125,19 @@ h2 { margin-bottom: 0; font-size: 17px; letter-spacing: -.025em; }
 }
 .watch-item:hover { background: var(--panel); }
 .watch-item.active { background: var(--panel-2); border-color: var(--line); }
+.watch-item.model-buy { border-color: color-mix(in srgb, var(--green) 48%, transparent); background: color-mix(in srgb, var(--green) 7%, var(--panel)); }
+.watch-item.model-sell { border-color: color-mix(in srgb, var(--red) 42%, transparent); background: color-mix(in srgb, var(--red) 6%, var(--panel)); }
 .watch-item.alert-buy { border-color: color-mix(in srgb, var(--green) 48%, transparent); background: color-mix(in srgb, var(--green) 8%, var(--panel)); }
 .watch-item.alert-sell { border-color: color-mix(in srgb, var(--red) 48%, transparent); background: color-mix(in srgb, var(--red) 8%, var(--panel)); }
+.watch-item.alert-buy { box-shadow: inset 0 0 0 1px var(--green), 0 0 18px color-mix(in srgb, var(--green) 12%, transparent); }
+.watch-item.alert-sell { box-shadow: inset 0 0 0 1px var(--red), 0 0 18px color-mix(in srgb, var(--red) 12%, transparent); }
 .ticker-avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--line); color: var(--muted); font-size: 9px; font-weight: 800; }
 .watch-item.active .ticker-avatar { background: var(--accent); color: #11170a; }
 .ticker-id strong, .ticker-id small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticker-id strong { font-size: 12px; }
+.zone-tag { display: inline-block; margin-left: 4px; padding: 2px 4px; border-radius: 4px; background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); font-size: 7px; font-style: normal; vertical-align: 1px; }
+.model-sell .zone-tag { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+.zone-tag.custom { color: var(--text); outline: 1px solid currentColor; }
 .ticker-id small { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .ticker-quote { text-align: right; }
 .ticker-quote strong, .ticker-quote small { display: block; }
@@ -203,6 +210,9 @@ h2 { margin-bottom: 0; font-size: 17px; letter-spacing: -.025em; }
 .signal-box small, .range-box small { display: block; margin-top: 7px; color: var(--muted); font-size: 8px; }
 .buy-range { border-color: color-mix(in srgb, var(--green) 26%, var(--line)); }.buy-range > strong { color: var(--green); }
 .sell-range { border-color: color-mix(in srgb, var(--red) 26%, var(--line)); }.sell-range > strong { color: var(--red); }
+.range-box.active-zone { border-width: 2px; box-shadow: 0 0 24px color-mix(in srgb, var(--green) 17%, transparent); background: color-mix(in srgb, var(--green) 11%, var(--panel-2)); }
+.sell-range.active-zone { box-shadow: 0 0 24px color-mix(in srgb, var(--red) 17%, transparent); background: color-mix(in srgb, var(--red) 10%, var(--panel-2)); }
+.live-model-badge { display: inline-block; margin-left: 6px; padding: 3px 6px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-style: normal; font-weight: 700; vertical-align: 2px; }
 .confidence { height: 3px; margin-top: 10px; overflow: hidden; border-radius: 5px; background: var(--line); }
 .confidence i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .5s ease; }
 .indicator-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
@@ -252,6 +262,43 @@ h2 { margin-bottom: 0; font-size: 17px; letter-spacing: -.025em; }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Readability pass: the dashboard is designed to be glanced at from a desk. */
+.market-badge { font-size: 13px; }
+.updated-at, .refresh-button { font-size: 12px; }
+.eyebrow { font-size: 10px; }
+h2 { font-size: 20px; }
+.text-button { font-size: 13px; }
+.symbol-form input { font-size: 14px; }
+.ticker-id strong { font-size: 14px; }
+.ticker-id small, .ticker-quote small { font-size: 11px; }
+.ticker-quote strong { font-size: 13px; }
+.zone-tag { font-size: 9px; }
+.watch-footer { font-size: 10px; }
+.quote-head p, .quote-change { font-size: 13px; }
+.period-tabs button, .chart-legend { font-size: 10px; }
+.quote-stats span { font-size: 10px; }
+.quote-stats strong { font-size: 13px; }
+.signal-box > span, .range-box > span { font-size: 11px; }
+.signal-box small, .range-box small { font-size: 10px; }
+.indicator span { font-size: 10px; }
+.indicator strong { font-size: 13px; }
+.indicator small { font-size: 9px; }
+.analysis-note span { font-size: 11px; }
+.analysis-note p { font-size: 12px; }
+.helper { font-size: 12px; }
+.save-status, .range-form legend { font-size: 11px; }
+.range-form label { font-size: 9px; }
+.range-form input { font-size: 12px; }
+.primary-button, .secondary-button { font-size: 11px; }
+.option-stat span { font-size: 10px; }
+.option-stat small { font-size: 9px; }
+.contract-list h3 { font-size: 11px; }
+.contract { font-size: 11px; }
+.options-caption { font-size: 10px; }
+.news-meta { font-size: 9px; }
+.news-item h3 { font-size: 13px; }
+.disclaimer { font-size: 10px; }
 
 @media (max-width: 1080px) {
   .dashboard { grid-template-columns: minmax(0,1fr); }
