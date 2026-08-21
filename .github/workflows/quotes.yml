@@ -1,11 +1,7 @@
 name: Refresh Quotes
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - scripts/fetch_quotes.py
-      - .github/workflows/quotes.yml
+  # Optional fallback for an owner-triggered quote refresh from the Actions tab.
   workflow_dispatch:
 
 permissions:
