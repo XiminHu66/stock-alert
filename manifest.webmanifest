@@ -1,0 +1,10 @@
+{
+  "name": "Stock Alert · 交易观察台",
+  "short_name": "Stock Alert",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#090c11",
+  "theme_color": "#090c11",
+  "lang": "zh-CN",
+  "description": "自选股、新闻、期权活跃度、技术分析与价格区间提醒。"
+}
