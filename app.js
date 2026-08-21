@@ -26,7 +26,8 @@ const state = {
   analysis: null,
   dismissedAlert: false,
   directQuoteAt: null,
-  directQuoteSymbol: null
+  directQuoteSymbol: null,
+  directQuoteDisabled: false
 };
 
 function readStorage(key, fallback) {
@@ -63,8 +64,10 @@ async function fetchJson(url, timeout = 12000) {
 async function loadMarketData(showFeedback = false) {
   $("refreshButton").classList.add("loading");
   const stamp = Date.now();
-  const sources = [`${RAW_DATA}?t=${stamp}`, `data/market.json?t=${stamp}`];
-  const quoteSources = [`${RAW_QUOTES}?t=${stamp}`, `data/quotes.json?t=${stamp}`];
+  // Pages-hosted files are deployed on every data commit and avoid the longer
+  // raw.githubusercontent.com CDN cache. Raw GitHub remains the fallback.
+  const sources = [`data/market.json?t=${stamp}`, `${RAW_DATA}?t=${stamp}`];
+  const quoteSources = [`data/quotes.json?t=${stamp}`, `${RAW_QUOTES}?t=${stamp}`];
   let loaded = null;
   for (const source of sources) {
     try { loaded = await fetchJson(source); if (loaded?.symbols) break; }
@@ -124,6 +127,7 @@ async function fetchCustomSymbol(symbol, showFeedback = true) {
 }
 
 async function fetchLiveSelectedQuote(showFeedback = false) {
+  if (state.directQuoteDisabled && !showFeedback) return false;
   const symbol = state.selected; const item = dataFor(symbol); if (!symbol || !item) return false;
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m&includePrePost=true&events=div%2Csplits`;
@@ -142,6 +146,7 @@ async function fetchLiveSelectedQuote(showFeedback = false) {
     if (showFeedback) toast(`${displayFor(symbol)} 当前价已直连刷新`);
     return true;
   } catch (error) {
+    if (!showFeedback) state.directQuoteDisabled = true;
     console.warn("Direct quote unavailable; using scheduled snapshot", error);
     if (showFeedback) toast("直连暂不可用，已保留后台快照");
     return false;

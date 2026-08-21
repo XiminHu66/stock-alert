@@ -9,6 +9,8 @@ on:
       - app.js
       - manifest.webmanifest
       - .nojekyll
+      - data/quotes.json
+      - data/market.json
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -19,7 +21,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
