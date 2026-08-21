@@ -7,7 +7,7 @@
   <meta name="description" content="自选股、新闻、期权活跃度、技术分析与价格区间提醒。">
   <title>Stock Alert · 交易观察台</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=20260821-options">
+  <link rel="stylesheet" href="styles.css?v=20260821-hourly-expiries">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -25,7 +25,7 @@
       <div class="top-actions">
         <button id="notifyButton" class="icon-button" type="button" title="启用浏览器提醒" aria-label="启用浏览器提醒">◌</button>
         <button id="themeButton" class="icon-button" type="button" title="切换主题" aria-label="切换主题">☼</button>
-        <button id="refreshButton" class="refresh-button" type="button"><span>↻</span> 刷新</button>
+        <button id="refreshButton" class="refresh-button" type="button" title="强制读取最新快照并尝试直连当前价"><span>↻</span> 手动刷新</button>
       </div>
     </header>
 
@@ -170,7 +170,7 @@
       </section>
 
       <footer class="disclaimer">
-        数据通常延迟 15–30 分钟；期权区为快照而非逐笔成交流。模型仅用于研究与提醒，不构成投资建议。
+        自动快照在美股交易时段每小时更新；手动刷新会读取最新快照并尝试直连当前价。期权区为快照而非逐笔成交流。模型仅用于研究与提醒，不构成投资建议。
       </footer>
     </main>
   </div>
@@ -198,6 +198,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="app.js?v=20260821-fresh-data" defer></script>
+  <script src="app.js?v=20260821-hourly-expiries" defer></script>
 </body>
 </html>

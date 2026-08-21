@@ -25,6 +25,7 @@ const state = {
   period: "1Y",
   analysis: null,
   dismissedAlert: false,
+  optionExpiryBySymbol: {},
   directQuoteAt: null,
   directQuoteSymbol: null,
   directQuoteDisabled: false
@@ -61,6 +62,16 @@ async function fetchJson(url, timeout = 12000) {
   } finally { clearTimeout(timer); }
 }
 
+async function fetchFreshest(sources, label) {
+  const results = await Promise.allSettled(sources.map(source => fetchJson(source)));
+  const candidates = results.flatMap((result, index) => {
+    if (result.status === "fulfilled" && result.value?.symbols) return [result.value];
+    if (result.status === "rejected") console.warn(`${label} data source failed`, sources[index], result.reason);
+    return [];
+  });
+  return candidates.sort((a, b) => new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0))[0] || null;
+}
+
 async function loadMarketData(showFeedback = false) {
   $("refreshButton").classList.add("loading");
   const stamp = Date.now();
@@ -68,20 +79,14 @@ async function loadMarketData(showFeedback = false) {
   // raw.githubusercontent.com CDN cache. Raw GitHub remains the fallback.
   const sources = [`data/market.json?t=${stamp}`, `${RAW_DATA}?t=${stamp}`];
   const quoteSources = [`data/quotes.json?t=${stamp}`, `${RAW_QUOTES}?t=${stamp}`];
-  let loaded = null;
-  for (const source of sources) {
-    try { loaded = await fetchJson(source); if (loaded?.symbols) break; }
-    catch (error) { console.warn("Market data source failed", source, error); }
-  }
+  const [loaded, quotes] = await Promise.all([
+    fetchFreshest(sources, "Market"),
+    fetchFreshest(quoteSources, "Quote")
+  ]);
   if (loaded?.symbols) {
     const directItem = state.directQuoteSymbol ? dataFor(state.directQuoteSymbol) : null;
     const directCarry = directItem ? { symbol: state.directQuoteSymbol, at: state.directQuoteAt, price: directItem.price, previousClose: directItem.previousClose, change: directItem.change, changePct: directItem.changePct, lastTradeAt: directItem.lastTradeAt, liveSource: directItem.liveSource } : null;
     state.data = loaded;
-    let quotes = null;
-    for (const source of quoteSources) {
-      try { quotes = await fetchJson(source); if (quotes?.symbols) break; }
-      catch (error) { console.warn("Quote source failed", source, error); }
-    }
     if (quotes?.symbols) {
       Object.entries(quotes.symbols).forEach(([symbol, quote]) => {
         if (state.data.symbols[symbol]) Object.assign(state.data.symbols[symbol], quote);
@@ -91,11 +96,12 @@ async function loadMarketData(showFeedback = false) {
     if (directCarry && new Date(directCarry.at).getTime() > new Date(state.data.quoteGeneratedAt || 0).getTime() && state.data.symbols[directCarry.symbol]) {
       Object.assign(state.data.symbols[directCarry.symbol], directCarry);
     }
-    if (showFeedback) toast("报价与模型已刷新");
+    if (showFeedback) toast("已读取最新发布快照，模型已重新推演");
   } else if (showFeedback) toast("暂时无法更新，保留已有数据");
   $("refreshButton").classList.remove("loading");
   updateMarketStatus(); renderAll();
   if (!dataFor()) await fetchCustomSymbol(state.selected, showFeedback);
+  return Boolean(loaded?.symbols);
 }
 
 async function fetchCustomSymbol(symbol, showFeedback = true) {
@@ -126,8 +132,8 @@ async function fetchCustomSymbol(symbol, showFeedback = true) {
   }
 }
 
-async function fetchLiveSelectedQuote(showFeedback = false) {
-  if (state.directQuoteDisabled && !showFeedback) return false;
+async function fetchLiveSelectedQuote(force = false) {
+  if (state.directQuoteDisabled && !force) return false;
   const symbol = state.selected; const item = dataFor(symbol); if (!symbol || !item) return false;
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m&includePrePost=true&events=div%2Csplits`;
@@ -143,12 +149,10 @@ async function fetchLiveSelectedQuote(showFeedback = false) {
     Object.assign(item, { price, previousClose, change, changePct: previousClose ? change / previousClose * 100 : null, lastTradeAt: lastTradeAt || item.lastTradeAt, liveSource: "Yahoo browser chart" });
     state.directQuoteAt = new Date().toISOString(); state.directQuoteSymbol = symbol;
     if (state.selected === symbol) { updateMarketStatus(); renderAll(); }
-    if (showFeedback) toast(`${displayFor(symbol)} 当前价已直连刷新`);
     return true;
   } catch (error) {
-    if (!showFeedback) state.directQuoteDisabled = true;
+    state.directQuoteDisabled = true;
     console.warn("Direct quote unavailable; using scheduled snapshot", error);
-    if (showFeedback) toast("直连暂不可用，已保留后台快照");
     return false;
   }
 }
@@ -383,32 +387,51 @@ function optionTrendSvg(points) {
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="${neutralY}" x2="${width}" y2="${neutralY}"/><path d="${path}"/><circle cx="${x(values.length - 1)}" cy="${y(values.at(-1))}" r="3"/></svg>`;
 }
 
+function optionSnapshots(options) {
+  if (!options) return [];
+  const snapshots = Array.isArray(options.expirations) ? options.expirations.filter(item => item?.expiration) : [];
+  return snapshots.length ? snapshots : options.expiration ? [options] : [];
+}
+
+function selectedOptionSnapshot(options, symbol = state.selected) {
+  const snapshots = optionSnapshots(options);
+  if (!snapshots.length) return null;
+  const requested = state.optionExpiryBySymbol[symbol] || options.defaultExpiration;
+  return snapshots.find(item => item.expiration === requested) || snapshots[0];
+}
+
 function renderOptions(options, spotPrice) {
   if (!options || options.error) { $("optionsBody").innerHTML = `<div class="empty-state">${options?.error ? "该标的暂无期权快照" : "等待自动抓取期权快照"}</div>`; return; }
-  const ratio = finite(options.putCallVolume); const tone = ratio === null ? "" : ratio > 1.15 ? "negative" : ratio < .75 ? "positive" : "";
-  const callVolume = finite(options.callVolume) || 0, putVolume = finite(options.putVolume) || 0, totalVolume = callVolume + putVolume;
+  const snapshots = optionSnapshots(options); const view = selectedOptionSnapshot(options);
+  if (!view) { $("optionsBody").innerHTML = `<div class="empty-state">等待自动抓取期权快照</div>`; return; }
+  state.optionExpiryBySymbol[state.selected] = view.expiration;
+  const expiryTime = Math.floor(new Date(`${view.expiration}T00:00:00Z`).getTime() / 1000);
+  $("optionsLink").href = `https://finance.yahoo.com/quote/${encodeURIComponent(state.selected)}/options/${Number.isFinite(expiryTime) ? `?date=${expiryTime}` : ""}`;
+  const ratio = finite(view.putCallVolume); const tone = ratio === null ? "" : ratio > 1.15 ? "negative" : ratio < .75 ? "positive" : "";
+  const callVolume = finite(view.callVolume) || 0, putVolume = finite(view.putVolume) || 0, totalVolume = callVolume + putVolume;
   const callShare = totalVolume ? callVolume / totalVolume * 100 : 50; const putShare = 100 - callShare;
-  const profiles = (options.strikeProfile || []).filter(row => finite(row.strike) !== null).sort((a, b) => Math.abs(a.strike - spotPrice) - Math.abs(b.strike - spotPrice)).slice(0, 9).sort((a, b) => a.strike - b.strike);
+  const profiles = (view.strikeProfile || []).filter(row => finite(row.strike) !== null).sort((a, b) => Math.abs(a.strike - spotPrice) - Math.abs(b.strike - spotPrice)).slice(0, 9).sort((a, b) => a.strike - b.strike);
   const maxOi = Math.max(1, ...profiles.flatMap(row => [finite(row.callOi) || 0, finite(row.putOi) || 0]));
   const profileRows = profiles.map(row => {
     const near = spotPrice && Math.abs(row.strike - spotPrice) === Math.min(...profiles.map(item => Math.abs(item.strike - spotPrice)));
     const strikeDigits = Number(row.strike) % 1 ? 1 : 0;
     return `<div class="oi-row ${near ? "near" : ""}"><span class="oi-number">${fmtCompact(row.callOi)}</span><i class="call-oi" style="width:${clamp((finite(row.callOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><b>${fmt(row.strike, strikeDigits)}</b><i class="put-oi" style="width:${clamp((finite(row.putOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><span class="oi-number">${fmtCompact(row.putOi)}</span></div>`;
   }).join("");
-  const levels = [options.putWall, spotPrice, options.maxPain, options.callWall].map(finite).filter(value => value !== null);
+  const levels = [view.putWall, spotPrice, view.maxPain, view.callWall].map(finite).filter(value => value !== null);
   let ladder = "";
   if (levels.length >= 2) {
     let low = Math.min(...levels), high = Math.max(...levels); const pad = Math.max((high - low) * .12, (spotPrice || high) * .01); low -= pad; high += pad;
     const marker = (label, value, kind) => finite(value) === null ? "" : `<span class="price-marker ${kind}" style="left:${clamp((value-low)/(high-low)*100,2,98).toFixed(1)}%"><i></i><b>${label}</b><small>$${fmt(value, 0)}</small></span>`;
-    ladder = `<div class="option-ladder"><div class="ladder-track"></div>${marker("Put Wall",options.putWall,"put")}${marker("现价",spotPrice,"spot")}${marker("Max Pain",options.maxPain,"pain")}${marker("Call Wall",options.callWall,"call")}</div>`;
+    ladder = `<div class="option-ladder"><div class="ladder-track"></div>${marker("Put Wall",view.putWall,"put")}${marker("现价",spotPrice,"spot")}${marker("Max Pain",view.maxPain,"pain")}${marker("Call Wall",view.callWall,"call")}</div>`;
   }
-  const trend = (options.trend || []).filter(point => finite(point.putCallVolume) !== null);
-  const contracts = (options.topContracts || []).slice(0,3).map(contract => `<div class="contract ${contract.type === "put" ? "put" : ""}"><b>${escapeHtml(contract.type?.toUpperCase()||"—")} ${fmt(contract.strike)}</b><span>Vol ${fmtCompact(contract.volume)}</span><span>V/OI ${fmt(contract.volumeOi,1)}</span></div>`).join("");
-  $("optionsBody").innerHTML = `<div class="options-summary">
-    <div class="option-stat"><span>到期日</span><strong>${escapeHtml(options.expiration || "—")}</strong><small>${options.daysToExpiry ?? "—"} DTE</small></div>
+  const trend = (view.trend || []).filter(point => finite(point.putCallVolume) !== null);
+  const contracts = (view.topContracts || []).slice(0,3).map(contract => `<div class="contract ${contract.type === "put" ? "put" : ""}"><b>${escapeHtml(contract.type?.toUpperCase()||"—")} ${fmt(contract.strike)}</b><span>Vol ${fmtCompact(contract.volume)}</span><span>V/OI ${fmt(contract.volumeOi,1)}</span></div>`).join("");
+  const expiryOptions = snapshots.map(item => `<option value="${escapeHtml(item.expiration)}" ${item.expiration === view.expiration ? "selected" : ""}>${escapeHtml(item.expiration)} · ${item.daysToExpiry ?? "—"} DTE</option>`).join("");
+  $("optionsBody").innerHTML = `<div class="option-expiry-control"><label for="expirySelect">查看到期日</label><select id="expirySelect" class="expiry-select" ${snapshots.length < 2 ? "disabled" : ""}>${expiryOptions}</select><small>快照 ${ageText(view.capturedAt)}</small></div><div class="options-summary">
+    <div class="option-stat"><span>当前到期日</span><strong>${escapeHtml(view.expiration || "—")}</strong><small>${view.daysToExpiry ?? "—"} DTE · 共 ${snapshots.length} 个日期</small></div>
     <div class="option-stat"><span>Put / Call 成交量</span><strong class="${tone}">${fmt(ratio,2)}</strong><small>${ratio>1?"Put 更活跃":"Call 更活跃"}</small></div>
-    <div class="option-stat"><span>Put / Call OI</span><strong>${fmt(options.putCallOi,2)}</strong><small>未平仓比率</small></div>
-    <div class="option-stat"><span>估算 Max Pain</span><strong>$${fmt(options.maxPain)}</strong><small>按当前 OI 粗估</small></div>
+    <div class="option-stat"><span>Put / Call OI</span><strong>${fmt(view.putCallOi,2)}</strong><small>未平仓比率</small></div>
+    <div class="option-stat"><span>估算 Max Pain</span><strong>$${fmt(view.maxPain)}</strong><small>按当前 OI 粗估</small></div>
   </div>
   <section class="option-viz"><div class="mini-heading"><span>Call / Put 成交活跃度</span><small>方向代理，不是主动买卖单</small></div><div class="flow-labels"><b>Call ${fmt(callShare,0)}%</b><b>Put ${fmt(putShare,0)}%</b></div><div class="flow-meter"><i style="width:${callShare.toFixed(1)}%"></i><i style="width:${putShare.toFixed(1)}%"></i></div></section>
   <section class="option-viz"><div class="mini-heading"><span>Put / Call 成交比趋势</span><small>${trend.length > 1 ? `${trend.length} 个快照` : "正在积累快照"}</small></div><div class="ratio-chart">${optionTrendSvg(trend)}<span>1.0 中性线</span></div></section>
@@ -446,7 +469,19 @@ function bindEvents() {
   });
   $("addSymbolForm").addEventListener("submit", event => { event.preventDefault(); const input=$("symbolInput"); let symbol=input.value.trim().toUpperCase(); if(!symbol)return; if(symbol==="SPX")symbol="^GSPC"; if(symbol==="BTCUSD")symbol="BTC-USD"; if(!state.watchlist.some(item=>item.symbol===symbol))state.watchlist.push({symbol,display:symbol.replace("-USD","USD").replace("^GSPC","SPX"),name:symbol}); state.selected=symbol; input.value=""; writeStorage(KEYS.watchlist,state.watchlist); localStorage.setItem(KEYS.selected,symbol); renderAll(); fetchCustomSymbol(symbol); });
   $("resetWatchlist").addEventListener("click",()=>{state.watchlist=structuredClone(DEFAULT_WATCHLIST);writeStorage(KEYS.watchlist,state.watchlist);renderAll();toast("已恢复 deskboard 默认列表");});
-  $("refreshButton").addEventListener("click",async()=>{await loadMarketData(false);await fetchLiveSelectedQuote(true);});
+  $("refreshButton").addEventListener("click",async()=>{
+    await loadMarketData(false);
+    $("refreshButton").classList.add("loading");
+    const direct = await fetchLiveSelectedQuote(true);
+    $("refreshButton").classList.remove("loading");
+    const optionAt = selectedOptionSnapshot(dataFor()?.options)?.capturedAt;
+    toast(`${direct ? "当前价已直连更新" : "已读取最新后台报价"} · 期权快照 ${ageText(optionAt)} · 模型已重算`);
+  });
+  $("optionsBody").addEventListener("change", event => {
+    if (event.target.id !== "expirySelect") return;
+    state.optionExpiryBySymbol[state.selected] = event.target.value;
+    renderOptions(dataFor()?.options, dataFor()?.price);
+  });
   document.querySelectorAll("[data-period]").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll("[data-period]").forEach(node=>node.classList.remove("active"));button.classList.add("active");state.period=button.dataset.period;renderChart(dataFor()?.history||[],state.analysis);}));
   $("rangeForm").addEventListener("submit", event => { event.preventDefault(); const value=id=>finite($(id).value); const range={buyLow:value("buyLowInput"),buyHigh:value("buyHighInput"),sellLow:value("sellLowInput"),sellHigh:value("sellHighInput")}; if([range.buyLow,range.buyHigh,range.sellLow,range.sellHigh].some(v=>v===null)){toast("请完整填写两个价格区间");return;} if(range.buyLow>range.buyHigh||range.sellLow>range.sellHigh){toast("最低价不能高于最高价");return;} state.ranges[state.selected]=range;writeStorage(KEYS.ranges,state.ranges);state.dismissedAlert=false;renderAll();toast("提醒区间已保存"); });
   $("useModelRanges").addEventListener("click",()=>{if(!state.analysis)return; const a=state.analysis; $("buyLowInput").value=a.buyLow.toFixed(2);$("buyHighInput").value=a.buyHigh.toFixed(2);$("sellLowInput").value=a.sellLow.toFixed(2);$("sellHighInput").value=a.sellHigh.toFixed(2);toast("已填入模型区间，点击保存后生效");});

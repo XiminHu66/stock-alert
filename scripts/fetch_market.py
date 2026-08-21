@@ -49,6 +49,9 @@ SYMBOLS = {
     "PLTR": ("PLTR", "Palantir", "NASDAQ"),
     "W": ("W", "Wayfair", "NYSE"),
 }
+MULTI_EXPIRY_SYMBOLS = {
+    "QQQ", "AAPL", "SMH", "NVDA", "INTC", "UNH", "HOOD", "NOW", "VST", "MRVL"
+}
 
 
 def native(value: Any) -> Any:
@@ -142,19 +145,15 @@ def max_pain(calls: pd.DataFrame, puts: pd.DataFrame) -> float | None:
     return min(losses)[1]
 
 
-def option_snapshot(
+def option_chain_snapshot(
     ticker: yf.Ticker,
+    expiry: str,
+    expiry_date: Any,
     spot_price: float | None,
     previous: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     try:
-        expirations = list(ticker.options or [])
-        if not expirations:
-            return None
         today = datetime.now(timezone.utc).date()
-        candidates = [(datetime.strptime(value, "%Y-%m-%d").date(), value) for value in expirations]
-        preferred = [item for item in candidates if (item[0] - today).days >= 21]
-        expiry_date, expiry = (preferred or candidates)[0]
         chain = ticker.option_chain(expiry)
         calls, puts = chain.calls.copy(), chain.puts.copy()
         call_volume = pd.to_numeric(calls.get("volume"), errors="coerce").fillna(0).sum()
@@ -256,6 +255,57 @@ def option_snapshot(
             "topContracts": active[:7],
         }
     except Exception as error:
+        print(f"options {expiry}: {error}")
+        return None
+
+
+def option_snapshot(
+    ticker: yf.Ticker,
+    spot_price: float | None,
+    previous: dict[str, Any] | None = None,
+    max_expirations: int = 2,
+) -> dict[str, Any] | None:
+    """Fetch several nearby expirations and keep a per-expiry trend history."""
+    try:
+        today = datetime.now(timezone.utc).date()
+        candidates = [
+            (datetime.strptime(value, "%Y-%m-%d").date(), value)
+            for value in list(ticker.options or [])
+        ]
+        candidates = [item for item in candidates if item[0] >= today][:max_expirations]
+        if not candidates:
+            return None
+
+        prior_by_expiry: dict[str, dict[str, Any]] = {}
+        if isinstance(previous, dict):
+            for snapshot in previous.get("expirations") or []:
+                if isinstance(snapshot, dict) and snapshot.get("expiration"):
+                    prior_by_expiry[snapshot["expiration"]] = snapshot
+            if previous.get("expiration"):
+                prior_by_expiry.setdefault(previous["expiration"], previous)
+
+        snapshots: list[dict[str, Any]] = []
+        for expiry_date, expiry in candidates:
+            snapshot = option_chain_snapshot(
+                ticker,
+                expiry,
+                expiry_date,
+                spot_price,
+                prior_by_expiry.get(expiry),
+            )
+            if snapshot:
+                snapshots.append(snapshot)
+        if not snapshots:
+            return None
+
+        preferred = next((item for item in snapshots if (item.get("daysToExpiry") or 0) >= 21), snapshots[0])
+        return {
+            **preferred,
+            "defaultExpiration": preferred["expiration"],
+            "availableExpirations": [item["expiration"] for item in snapshots],
+            "expirations": snapshots,
+        }
+    except Exception as error:
         print(f"options: {error}")
         return None
 
@@ -308,7 +358,12 @@ def symbol_snapshot(symbol: str, meta: tuple[str, str, str], previous: dict[str,
     previous_news = previous.get("news") if isinstance(previous.get("news"), list) else []
     news = extract_news(ticker) or previous_news
     previous_options = previous.get("options")
-    options = None if symbol in {"^GSPC", "BTC-USD"} else option_snapshot(ticker, price, previous_options)
+    options = None if symbol in {"^GSPC", "BTC-USD"} else option_snapshot(
+        ticker,
+        price,
+        previous_options,
+        max_expirations=4 if symbol in MULTI_EXPIRY_SYMBOLS else 2,
+    )
     if options is None:
         options = previous_options
     fundamentals = None if symbol in {"^GSPC", "BTC-USD"} else fundamental_snapshot(ticker, previous.get("fundamentals"))

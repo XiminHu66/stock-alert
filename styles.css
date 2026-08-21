@@ -259,7 +259,12 @@ h2 { margin-bottom: 0; font-size: 17px; letter-spacing: -.025em; }
 
 .options-card { min-height: 320px; }
 .options-body { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.options-summary { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-top: 16px; }
+.option-expiry-control { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; margin-top: 14px; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.option-expiry-control label { color: var(--muted); font-size: 10px; font-weight: 700; }
+.option-expiry-control small { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.expiry-select { min-width: 0; height: 34px; padding: 0 30px 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
+.expiry-select:disabled { cursor: default; opacity: .7; }
+.options-summary { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-top: 10px; }
 .option-stat { padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
 .option-stat span, .option-stat strong, .option-stat small { display: block; }.option-stat span { color: var(--muted); font-size: 8px; }.option-stat strong { margin-top: 6px; font-size: 16px; }.option-stat small { margin-top: 4px; color: var(--muted); font-size: 7px; }
 .contract-list { margin-top: 15px; }
