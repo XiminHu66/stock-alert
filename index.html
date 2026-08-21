@@ -95,7 +95,7 @@
             <span>综合信号</span>
             <strong id="signalText">等待数据</strong>
             <div class="confidence"><i id="confidenceBar"></i></div>
-            <small id="confidenceText">置信度 —</small>
+            <small id="confidenceText">指标一致度 —</small>
           </div>
           <div id="modelBuyBox" class="range-box buy-range">
             <span>模型买入观察区</span>
@@ -112,6 +112,18 @@
         <div class="analysis-note">
           <span>模型解读</span>
           <p id="analysisSummary">加载历史数据后，将根据趋势、动量、波动和支撑阻力生成区间。</p>
+        </div>
+        <div class="evidence-grid">
+          <section class="backtest-panel">
+            <div class="mini-heading"><span>滚动历史检验</span><small>进入买入区后 20 个交易日</small></div>
+            <div id="backtestMetrics" class="backtest-metrics"><div class="empty-state">等待历史样本</div></div>
+            <p id="backtestNote" class="micro-note">仅使用每个历史时点之前的数据；非独立样本，不含交易成本。</p>
+          </section>
+          <section class="fundamental-panel">
+            <div class="mini-heading"><span>估值背景</span><small>不参与技术区间计算</small></div>
+            <div id="fundamentalMetrics" class="fundamental-metrics"><div class="empty-state">等待基本面数据</div></div>
+            <p class="micro-note">PE 是基本面估值指标，需与行业、增长和盈利质量比较，不能单独当作买卖信号。</p>
+          </section>
         </div>
       </section>
 
@@ -167,15 +179,22 @@
     <form method="dialog"><button aria-label="关闭">×</button></form>
     <span class="eyebrow">MODEL NOTES</span>
     <h2>区间是怎样算出来的？</h2>
-    <p>模型使用近一年日线，组合趋势、动量、波动和历史支撑阻力。它不会预测唯一目标价，而是提供更适合执行的观察区间。</p>
+    <p>模型使用近一年日线，组合趋势、动量、波动和历史支撑阻力。它不会预测唯一目标价，而是提供观察区间；页面上的百分比是指标一致度，不是校准后的上涨概率。</p>
     <ol>
       <li><b>趋势：</b>SMA 20/50/200 判断多空排列与价格位置。</li>
       <li><b>动量：</b>RSI 14 与 MACD 判断超买超卖和动量拐点。</li>
       <li><b>波动：</b>ATR 14 和布林带决定区间宽度，避免用固定百分比。</li>
       <li><b>支撑阻力：</b>近期高低点、均线与布林带共同形成候选价位。</li>
-      <li><b>置信度：</b>由样本长度、趋势一致性和指标完整度综合计算。</li>
+      <li><b>滚动检验：</b>每个历史时点只读取当时及以前的数据，测量进入买入区后 20 个交易日的收益与期间最大回撤。</li>
+      <li><b>PE：</b>属于基本面估值，只单独展示，不在缺少行业基准时混入技术区间。</li>
     </ol>
-    <p class="dialog-warning">财报、宏观事件和跳空可能让历史技术位立即失效，请结合仓位和止损使用。</p>
+    <p class="model-sources"><b>研究与产品参照：</b>
+      <a href="https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.1992.tb04681.x" target="_blank" rel="noopener">Brock 等（1992）</a>、
+      <a href="https://web.mit.edu/Alo/www/Papers/techanal.html" target="_blank" rel="noopener">Lo 等（2000）</a>系统研究了技术规则；
+      <a href="https://ideas.repec.org/a/eee/revfin/v23y2014i1p30-45.html" target="_blank" rel="noopener">后续样本外研究</a>也报告经典规则失效。
+      <a href="https://www.tradingview.com/support/folders/43000587405-built-in-indicators/" target="_blank" rel="noopener">TradingView</a>提供相同指标作为分析工具，而非收益保证。
+    </p>
+    <p class="dialog-warning">当前版本是透明规则模型，不是经独立样本和交易成本验证的生产级预测器。财报、宏观事件和跳空可能让历史技术位立即失效。</p>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

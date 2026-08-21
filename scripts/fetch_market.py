@@ -142,7 +142,11 @@ def max_pain(calls: pd.DataFrame, puts: pd.DataFrame) -> float | None:
     return min(losses)[1]
 
 
-def option_snapshot(ticker: yf.Ticker) -> dict[str, Any] | None:
+def option_snapshot(
+    ticker: yf.Ticker,
+    spot_price: float | None,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     try:
         expirations = list(ticker.options or [])
         if not expirations:
@@ -157,6 +161,42 @@ def option_snapshot(ticker: yf.Ticker) -> dict[str, Any] | None:
         put_volume = pd.to_numeric(puts.get("volume"), errors="coerce").fillna(0).sum()
         call_oi = pd.to_numeric(calls.get("openInterest"), errors="coerce").fillna(0).sum()
         put_oi = pd.to_numeric(puts.get("openInterest"), errors="coerce").fillna(0).sum()
+        strike_rows: list[dict[str, Any]] = []
+        all_strikes = sorted(
+            set(pd.to_numeric(calls.get("strike"), errors="coerce").dropna())
+            | set(pd.to_numeric(puts.get("strike"), errors="coerce").dropna())
+        )
+        if spot_price and all_strikes:
+            nearby = [strike for strike in all_strikes if spot_price * 0.78 <= strike <= spot_price * 1.22]
+            if len(nearby) > 17:
+                nearby = sorted(nearby, key=lambda strike: abs(strike - spot_price))[:17]
+            nearby = sorted(nearby)
+            call_by_strike = calls.assign(
+                strikeNumeric=pd.to_numeric(calls.get("strike"), errors="coerce"),
+                oiNumeric=pd.to_numeric(calls.get("openInterest"), errors="coerce").fillna(0),
+                volumeNumeric=pd.to_numeric(calls.get("volume"), errors="coerce").fillna(0),
+            ).groupby("strikeNumeric")[["oiNumeric", "volumeNumeric"]].sum()
+            put_by_strike = puts.assign(
+                strikeNumeric=pd.to_numeric(puts.get("strike"), errors="coerce"),
+                oiNumeric=pd.to_numeric(puts.get("openInterest"), errors="coerce").fillna(0),
+                volumeNumeric=pd.to_numeric(puts.get("volume"), errors="coerce").fillna(0),
+            ).groupby("strikeNumeric")[["oiNumeric", "volumeNumeric"]].sum()
+            for strike in nearby:
+                call_row = call_by_strike.loc[strike] if strike in call_by_strike.index else None
+                put_row = put_by_strike.loc[strike] if strike in put_by_strike.index else None
+                strike_rows.append(
+                    {
+                        "strike": native(strike),
+                        "callOi": native(call_row["oiNumeric"]) if call_row is not None else 0,
+                        "putOi": native(put_row["oiNumeric"]) if put_row is not None else 0,
+                        "callVolume": native(call_row["volumeNumeric"]) if call_row is not None else 0,
+                        "putVolume": native(put_row["volumeNumeric"]) if put_row is not None else 0,
+                    }
+                )
+        puts_below = [row for row in strike_rows if row["strike"] <= (spot_price or 0)]
+        calls_above = [row for row in strike_rows if row["strike"] >= (spot_price or float("inf"))]
+        put_wall = max(puts_below, key=lambda row: row["putOi"], default=None)
+        call_wall = max(calls_above, key=lambda row: row["callOi"], default=None)
         active: list[dict[str, Any]] = []
         for frame, option_type in ((calls, "call"), (puts, "put")):
             working = frame.copy()
@@ -176,7 +216,30 @@ def option_snapshot(ticker: yf.Ticker) -> dict[str, Any] | None:
                     }
                 )
         active.sort(key=lambda item: (item.get("volumeOi") or 0, item.get("volume") or 0), reverse=True)
+        captured_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        current_trend = {
+            "t": captured_at,
+            "putCallVolume": native(put_volume / call_volume) if call_volume else None,
+            "putCallOi": native(put_oi / call_oi) if call_oi else None,
+            "callVolume": native(call_volume),
+            "putVolume": native(put_volume),
+            "maxPain": max_pain(calls, puts),
+        }
+        trend = list((previous or {}).get("trend") or [])
+        if not trend and previous and previous.get("capturedAt"):
+            trend.append(
+                {
+                    "t": previous.get("capturedAt"),
+                    "putCallVolume": previous.get("putCallVolume"),
+                    "putCallOi": previous.get("putCallOi"),
+                    "callVolume": previous.get("callVolume"),
+                    "putVolume": previous.get("putVolume"),
+                    "maxPain": previous.get("maxPain"),
+                }
+            )
+        trend.append(current_trend)
         return {
+            "capturedAt": captured_at,
             "expiration": expiry,
             "daysToExpiry": (expiry_date - today).days,
             "callVolume": native(call_volume),
@@ -185,12 +248,41 @@ def option_snapshot(ticker: yf.Ticker) -> dict[str, Any] | None:
             "callOi": native(call_oi),
             "putOi": native(put_oi),
             "putCallOi": native(put_oi / call_oi) if call_oi else None,
-            "maxPain": max_pain(calls, puts),
+            "maxPain": current_trend["maxPain"],
+            "putWall": put_wall["strike"] if put_wall else None,
+            "callWall": call_wall["strike"] if call_wall else None,
+            "strikeProfile": strike_rows,
+            "trend": trend[-32:],
             "topContracts": active[:7],
         }
     except Exception as error:
         print(f"options: {error}")
         return None
+
+
+def fundamental_snapshot(ticker: yf.Ticker, previous: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Fetch a compact daily valuation snapshot; preserve the prior value on transient errors."""
+    previous = previous if isinstance(previous, dict) else None
+    today = datetime.now(timezone.utc).date().isoformat()
+    if previous and str(previous.get("fetchedAt", "")).startswith(today):
+        return previous
+    try:
+        info = ticker.get_info() or {}
+        result = {
+            "fetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "trailingPE": native(info.get("trailingPE")),
+            "forwardPE": native(info.get("forwardPE")),
+            "priceToBook": native(info.get("priceToBook")),
+            "pegRatio": native(info.get("pegRatio")),
+            "earningsGrowth": native(info.get("earningsGrowth")),
+            "revenueGrowth": native(info.get("revenueGrowth")),
+            "marketCap": native(info.get("marketCap")),
+            "sector": info.get("sector") or info.get("category"),
+        }
+        return result if any(result.get(key) is not None for key in ("trailingPE", "forwardPE", "priceToBook", "marketCap")) else previous
+    except Exception as error:
+        print(f"fundamentals: {error}")
+        return previous
 
 
 def symbol_snapshot(symbol: str, meta: tuple[str, str, str], previous: dict[str, Any]) -> dict[str, Any]:
@@ -216,9 +308,10 @@ def symbol_snapshot(symbol: str, meta: tuple[str, str, str], previous: dict[str,
     previous_news = previous.get("news") if isinstance(previous.get("news"), list) else []
     news = extract_news(ticker) or previous_news
     previous_options = previous.get("options")
-    options = None if symbol in {"^GSPC", "BTC-USD"} else option_snapshot(ticker)
+    options = None if symbol in {"^GSPC", "BTC-USD"} else option_snapshot(ticker, price, previous_options)
     if options is None:
         options = previous_options
+    fundamentals = None if symbol in {"^GSPC", "BTC-USD"} else fundamental_snapshot(ticker, previous.get("fundamentals"))
     return {
         "symbol": symbol,
         "display": display,
@@ -233,6 +326,7 @@ def symbol_snapshot(symbol: str, meta: tuple[str, str, str], previous: dict[str,
         "history": rows,
         "news": news,
         "options": options,
+        "fundamentals": fundamentals,
         "source": "Yahoo Finance via scheduled GitHub Action",
     }
 

@@ -177,7 +177,7 @@ function renderSelected() {
   $("statPrev").textContent = fmt(item?.previousClose);
   $("stat52").textContent = analysis ? `${fmt(analysis.low52)} – ${fmt(analysis.high52)}` : "—";
   $("statVol").textContent = analysis ? `${fmt(analysis.annualVol,1)}%` : "—"; $("statAtr").textContent = analysis ? fmt(analysis.atr) : "—";
-  renderChart(item?.history || [], analysis); renderAnalysis(analysis); renderRangeForm(analysis); renderOptions(item?.options); renderNews(item?.news || []); renderAlert(item);
+  renderChart(item?.history || [], analysis); renderAnalysis(analysis, item?.history || [], item?.fundamentals); renderRangeForm(analysis); renderOptions(item?.options, item?.price); renderNews(item?.news || []); renderAlert(item);
 }
 
 function sma(values, period) { if (values.length < period) return null; return values.slice(-period).reduce((sum, value) => sum + value, 0) / period; }
@@ -232,14 +232,62 @@ function calculateAnalysis(history, livePrice) {
   return { price,sma20,sma50,sma200,rsi14,atr:atr14,macd,macdSignal,bbUpper,bbLower,high52,low52,annualVol,buyLow,buyHigh,sellLow,sellHigh,trendScore,signal,tone,confidence,summary:summaryParts.join("；")+"。" };
 }
 
-function renderAnalysis(analysis) {
+function walkForwardTest(history) {
+  const valid = history.filter(row => finite(row.c) !== null && finite(row.h) !== null && finite(row.l) !== null);
+  if (valid.length < 120) return null;
+  const trades = [];
+  for (let index = 80; index < valid.length - 20; index++) {
+    const entry = Number(valid[index].c); const model = calculateAnalysis(valid.slice(0, index + 1), entry);
+    if (!model || entry < model.buyLow || entry > model.buyHigh) continue;
+    const future = valid.slice(index + 1, index + 21).map(row => Number(row.c));
+    trades.push({ returnPct: (future.at(-1) / entry - 1) * 100, drawdownPct: (Math.min(...future) / entry - 1) * 100 });
+    index += 9;
+  }
+  if (!trades.length) return { sample: 0 };
+  const returns = trades.map(trade => trade.returnPct); const drawdowns = trades.map(trade => trade.drawdownPct);
+  return {
+    sample: trades.length,
+    winRate: returns.filter(value => value > 0).length / trades.length * 100,
+    averageReturn: returns.reduce((sum, value) => sum + value, 0) / trades.length,
+    medianReturn: median(returns),
+    worstDrawdown: Math.min(...drawdowns)
+  };
+}
+
+function renderEvidence(history, fundamentals) {
+  const test = walkForwardTest(history);
+  if (!test || !test.sample) {
+    $("backtestMetrics").innerHTML = `<div class="empty-state">${test ? "历史区间信号不足" : "至少需要约 120 个交易日"}</div>`;
+    $("backtestNote").textContent = "当前样本不足以形成可靠统计；不会用指标一致度冒充历史胜率。";
+  } else {
+    const metrics = [
+      ["样本", test.sample, "次独立间隔信号"], ["20日胜率", `${fmt(test.winRate, 0)}%`, "收益大于 0"],
+      ["平均收益", pct(test.averageReturn, 1), `中位数 ${pct(test.medianReturn, 1)}`], ["最差回撤", pct(test.worstDrawdown, 1), "入场后 20 日内"]
+    ];
+    $("backtestMetrics").innerHTML = metrics.map(([name, value, note]) => `<div><span>${name}</span><strong>${value}</strong><small>${note}</small></div>`).join("");
+    $("backtestNote").textContent = `滚动检验共 ${test.sample} 次信号；非独立样本，不含交易成本、滑点、分红和税费。`;
+  }
+  if (!fundamentals) {
+    $("fundamentalMetrics").innerHTML = `<div class="empty-state">该标的暂无估值快照</div>`;
+    return;
+  }
+  const growth = value => finite(value) === null ? "—" : pct(Number(value) * 100, 1);
+  const values = [
+    ["过去 PE", fmt(fundamentals.trailingPE, 1)], ["预期 PE", fmt(fundamentals.forwardPE, 1)],
+    ["市净率", fmt(fundamentals.priceToBook, 1)], ["PEG", fmt(fundamentals.pegRatio, 1)],
+    ["盈利增长", growth(fundamentals.earningsGrowth)], ["营收增长", growth(fundamentals.revenueGrowth)]
+  ];
+  $("fundamentalMetrics").innerHTML = values.map(([name, value]) => `<div><span>${name}</span><strong>${value}</strong></div>`).join("");
+}
+
+function renderAnalysis(analysis, history = [], fundamentals = null) {
   if (!analysis) {
     $("modelBuyBox").classList.remove("active-zone"); $("modelSellBox").classList.remove("active-zone");
     $("signalText").textContent = "数据不足"; $("confidenceBar").style.width = "0"; $("confidenceText").textContent = "至少需要 20 个交易日";
-    $("buyRange").textContent = $("sellRange").textContent = "—"; $("indicatorGrid").innerHTML = `<div class="empty-state">等待历史数据</div>`; $("analysisSummary").textContent = "当前标的尚无足够历史数据。"; return;
+    $("buyRange").textContent = $("sellRange").textContent = "—"; $("indicatorGrid").innerHTML = `<div class="empty-state">等待历史数据</div>`; $("analysisSummary").textContent = "当前标的尚无足够历史数据。"; renderEvidence(history, fundamentals); return;
   }
   $("signalText").textContent = analysis.signal; $("signalText").className = analysis.tone === "buy" ? "positive" : analysis.tone === "sell" ? "negative" : "";
-  $("confidenceBar").style.width = `${analysis.confidence}%`; $("confidenceText").textContent = `模型置信度 ${analysis.confidence}%`;
+  $("confidenceBar").style.width = `${analysis.confidence}%`; $("confidenceText").textContent = `指标一致度 ${analysis.confidence}%`;
   $("buyRange").textContent = `$${fmt(analysis.buyLow)} – ${fmt(analysis.buyHigh)}`; $("sellRange").textContent = `$${fmt(analysis.sellLow)} – ${fmt(analysis.sellHigh)}`;
   $("modelBuyBox").classList.toggle("active-zone", analysis.price >= analysis.buyLow && analysis.price <= analysis.buyHigh);
   $("modelSellBox").classList.toggle("active-zone", analysis.price >= analysis.sellLow && analysis.price <= analysis.sellHigh);
@@ -253,6 +301,7 @@ function renderAnalysis(analysis) {
   ];
   $("indicatorGrid").innerHTML = indicators.map(([name,value,note]) => `<div class="indicator"><span>${name}</span><strong>${value}</strong><small>${note}</small></div>`).join("");
   $("analysisSummary").textContent = analysis.summary;
+  renderEvidence(history, fundamentals);
 }
 
 function renderChart(history, analysis) {
@@ -278,16 +327,48 @@ function renderRangeForm(analysis) {
   $("useModelRanges").disabled = !analysis;
 }
 
-function renderOptions(options) {
+function optionTrendSvg(points) {
+  const values = points.map(point => finite(point.putCallVolume)).filter(value => value !== null);
+  if (!values.length) return "";
+  const width = 320, height = 62, pad = 6; let low = Math.min(...values, .5), high = Math.max(...values, 1.5); if (high === low) high += .1;
+  const x = index => values.length === 1 ? width / 2 : pad + index / (values.length - 1) * (width - pad * 2);
+  const y = value => pad + (high - value) / (high - low) * (height - pad * 2);
+  const path = values.map((value, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(" ");
+  const neutralY = y(1);
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="${neutralY}" x2="${width}" y2="${neutralY}"/><path d="${path}"/><circle cx="${x(values.length - 1)}" cy="${y(values.at(-1))}" r="3"/></svg>`;
+}
+
+function renderOptions(options, spotPrice) {
   if (!options || options.error) { $("optionsBody").innerHTML = `<div class="empty-state">${options?.error ? "该标的暂无期权快照" : "等待自动抓取期权快照"}</div>`; return; }
   const ratio = finite(options.putCallVolume); const tone = ratio === null ? "" : ratio > 1.15 ? "negative" : ratio < .75 ? "positive" : "";
-  const contracts = (options.topContracts || []).slice(0,5).map(contract => `<div class="contract ${contract.type === "put" ? "put" : ""}"><b>${escapeHtml(contract.type?.toUpperCase()||"—")} ${fmt(contract.strike)}</b><span>Vol ${fmtCompact(contract.volume)}</span><span>V/OI ${fmt(contract.volumeOi,1)}</span></div>`).join("");
+  const callVolume = finite(options.callVolume) || 0, putVolume = finite(options.putVolume) || 0, totalVolume = callVolume + putVolume;
+  const callShare = totalVolume ? callVolume / totalVolume * 100 : 50; const putShare = 100 - callShare;
+  const profiles = (options.strikeProfile || []).filter(row => finite(row.strike) !== null).sort((a, b) => Math.abs(a.strike - spotPrice) - Math.abs(b.strike - spotPrice)).slice(0, 9).sort((a, b) => a.strike - b.strike);
+  const maxOi = Math.max(1, ...profiles.flatMap(row => [finite(row.callOi) || 0, finite(row.putOi) || 0]));
+  const profileRows = profiles.map(row => {
+    const near = spotPrice && Math.abs(row.strike - spotPrice) === Math.min(...profiles.map(item => Math.abs(item.strike - spotPrice)));
+    return `<div class="oi-row ${near ? "near" : ""}"><span class="oi-number">${fmtCompact(row.callOi)}</span><i class="call-oi" style="width:${clamp((finite(row.callOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><b>${fmt(row.strike, 0)}</b><i class="put-oi" style="width:${clamp((finite(row.putOi)||0)/maxOi*100,0,100).toFixed(1)}%"></i><span class="oi-number">${fmtCompact(row.putOi)}</span></div>`;
+  }).join("");
+  const levels = [options.putWall, spotPrice, options.maxPain, options.callWall].map(finite).filter(value => value !== null);
+  let ladder = "";
+  if (levels.length >= 2) {
+    let low = Math.min(...levels), high = Math.max(...levels); const pad = Math.max((high - low) * .12, (spotPrice || high) * .01); low -= pad; high += pad;
+    const marker = (label, value, kind) => finite(value) === null ? "" : `<span class="price-marker ${kind}" style="left:${clamp((value-low)/(high-low)*100,2,98).toFixed(1)}%"><i></i><b>${label}</b><small>$${fmt(value, 0)}</small></span>`;
+    ladder = `<div class="option-ladder"><div class="ladder-track"></div>${marker("Put Wall",options.putWall,"put")}${marker("现价",spotPrice,"spot")}${marker("Max Pain",options.maxPain,"pain")}${marker("Call Wall",options.callWall,"call")}</div>`;
+  }
+  const trend = (options.trend || []).filter(point => finite(point.putCallVolume) !== null);
+  const contracts = (options.topContracts || []).slice(0,3).map(contract => `<div class="contract ${contract.type === "put" ? "put" : ""}"><b>${escapeHtml(contract.type?.toUpperCase()||"—")} ${fmt(contract.strike)}</b><span>Vol ${fmtCompact(contract.volume)}</span><span>V/OI ${fmt(contract.volumeOi,1)}</span></div>`).join("");
   $("optionsBody").innerHTML = `<div class="options-summary">
     <div class="option-stat"><span>到期日</span><strong>${escapeHtml(options.expiration || "—")}</strong><small>${options.daysToExpiry ?? "—"} DTE</small></div>
     <div class="option-stat"><span>Put / Call 成交量</span><strong class="${tone}">${fmt(ratio,2)}</strong><small>${ratio>1?"Put 更活跃":"Call 更活跃"}</small></div>
     <div class="option-stat"><span>Put / Call OI</span><strong>${fmt(options.putCallOi,2)}</strong><small>未平仓比率</small></div>
     <div class="option-stat"><span>估算 Max Pain</span><strong>$${fmt(options.maxPain)}</strong><small>按当前 OI 粗估</small></div>
-  </div><div class="contract-list"><h3>异常活跃合约 · 按 Volume / OI</h3>${contracts || '<div class="empty-state">无活跃合约</div>'}</div><p class="options-caption">快照聚合成交量与未平仓量，不提供逐笔买卖方向；高 V/OI 仅代表当日活跃。</p>`;
+  </div>
+  <section class="option-viz"><div class="mini-heading"><span>Call / Put 成交活跃度</span><small>方向代理，不是主动买卖单</small></div><div class="flow-labels"><b>Call ${fmt(callShare,0)}%</b><b>Put ${fmt(putShare,0)}%</b></div><div class="flow-meter"><i style="width:${callShare.toFixed(1)}%"></i><i style="width:${putShare.toFixed(1)}%"></i></div></section>
+  <section class="option-viz"><div class="mini-heading"><span>Put / Call 成交比趋势</span><small>${trend.length > 1 ? `${trend.length} 个快照` : "正在积累快照"}</small></div><div class="ratio-chart">${optionTrendSvg(trend)}<span>1.0 中性线</span></div></section>
+  <section class="option-viz"><div class="mini-heading"><span>期权关键价格带</span><small>OI Wall 是潜在支撑/阻力，不保证守住</small></div>${ladder || '<div class="empty-state compact">等待价格带</div>'}</section>
+  <section class="option-viz oi-profile"><div class="mini-heading"><span>行权价 OI 分布</span><small>Call OI ← 行权价 → Put OI</small></div>${profileRows || '<div class="empty-state compact">下次完整数据更新后显示</div>'}</section>
+  <div class="contract-list"><h3>异常活跃合约 · 按 Volume / OI</h3>${contracts || '<div class="empty-state compact">无活跃合约</div>'}</div><p class="options-caption">快照聚合成交量与未平仓量，无法区分每笔主动买入或卖出；Max Pain 与 OI Wall 是描述性统计，不是预测。</p>`;
 }
 
 function renderNews(news) {
