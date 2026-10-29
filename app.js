@@ -14,8 +14,8 @@ const KEYS = {
   theme: "stock_alert_theme_v1",
   notifications: "stock_alert_notifications_v1"
 };
-const RAW_DATA = "https://raw.githubusercontent.com/XiminHu66/stock-alert/main/data/market.json";
-const RAW_QUOTES = "https://raw.githubusercontent.com/XiminHu66/stock-alert/main/data/quotes.json";
+const RAW_DATA = "https://ximinhu66.github.io/PT-Universe/apps/stock-alert/data/market.json";
+const RAW_QUOTES = "https://ximinhu66.github.io/PT-Universe/apps/stock-alert/data/quotes.json";
 const $ = id => document.getElementById(id);
 const state = {
   watchlist: readStorage(KEYS.watchlist, DEFAULT_WATCHLIST),
@@ -77,8 +77,8 @@ async function loadMarketData(showFeedback = false) {
   const stamp = Date.now();
   // Pages-hosted files are deployed on every data commit and avoid the longer
   // raw.githubusercontent.com CDN cache. Raw GitHub remains the fallback.
-  const sources = [`data/market.json?t=${stamp}`, `${RAW_DATA}?t=${stamp}`];
-  const quoteSources = [`data/quotes.json?t=${stamp}`, `${RAW_QUOTES}?t=${stamp}`];
+  const sources = [`${RAW_DATA}?t=${stamp}`, `data/market.json?t=${stamp}`];
+  const quoteSources = [`${RAW_QUOTES}?t=${stamp}`, `data/quotes.json?t=${stamp}`];
   const [loaded, quotes] = await Promise.all([
     fetchFreshest(sources, "Market"),
     fetchFreshest(quoteSources, "Quote")
@@ -499,3 +499,4 @@ function init() {
   setInterval(()=>fetchLiveSelectedQuote(false),60*1000); setInterval(()=>loadMarketData(false),2*60*1000);
 }
 init();
+

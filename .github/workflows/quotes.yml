@@ -1,38 +1,14 @@
 name: Refresh Quotes
-
-on:
-  # Optional fallback for an owner-triggered quote refresh from the Actions tab.
-  workflow_dispatch:
-
+'on':
+  workflow_dispatch: null
 permissions:
   contents: write
-
 concurrency:
   group: stock-alert-quotes
   cancel-in-progress: true
-
 jobs:
   refresh-quotes:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Fetch quotes on demand
-        run: python scripts/fetch_quotes.py
-      - name: Commit refreshed quotes
-        run: |
-          git config user.name "stock-alert-bot"
-          git config user.email "stock-alert-bot@users.noreply.github.com"
-          git add -- data/quotes.json
-          if git diff --cached --quiet; then
-            echo "No quote changes"
-          else
-            git commit -m "data: refresh on-demand quotes"
-            git pull --rebase origin main
-            git push
-          fi
+    - run: echo 'Canonical quotes are maintained by PT-Universe refresh-stock.yml; this legacy page reads that snapshot.'

@@ -1,76 +1,34 @@
-name: Refresh Market Data
-
-on:
+name: Deploy legacy page (canonical PT data)
+'on':
   push:
-    branches: [main]
+    branches:
+    - main
     paths:
-      - scripts/fetch_market.py
-      - scripts/fetch_quotes.py
-      - requirements.txt
-      - .github/workflows/market-data.yml
-  schedule:
-    # Once per hour during regular US market hours, offset from :00 to reduce queue delay.
-    - cron: "41 9-15 * * 1-5"
-      timezone: "America/New_York"
-  workflow_dispatch:
-
+    - index.html
+    - app.js
+    - '*.css'
+    - web/**
+  workflow_dispatch: {}
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
-
 concurrency:
-  group: stock-alert-data
+  group: pages
   cancel-in-progress: false
-
 jobs:
-  refresh:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Fetch quotes, news and options
-        run: python scripts/fetch_market.py
-      - name: Refresh lightweight quotes
-        run: python scripts/fetch_quotes.py
-      - name: Commit refreshed snapshot
-        run: |
-          git config user.name "stock-alert-bot"
-          git config user.email "stock-alert-bot@users.noreply.github.com"
-          git add -- data/market.json data/quotes.json
-          if git diff --cached --quiet; then
-            echo "No data changes"
-          else
-            git commit -m "data: refresh hourly market snapshot"
-            if ! git pull --rebase origin main; then
-              # A manually triggered quote job may finish while this longer job
-              # is running. This commit contains data files only, so keep this
-              # run's freshly generated snapshots when replaying it.
-              for path in $(git diff --name-only --diff-filter=U); do
-                git checkout --theirs -- "$path"
-                git add -- "$path"
-              done
-              GIT_EDITOR=true git rebase --continue
-            fi
-            git push
-          fi
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-      - name: Upload refreshed dashboard
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-      - name: Deploy refreshed dashboard
-        id: deployment
-        uses: actions/deploy-pages@v5
+    - uses: actions/checkout@v4
+    - uses: actions/configure-pages@v5
+    - uses: actions/upload-pages-artifact@v3
+      with:
+        path: .
+        retention-days: 1
+    - uses: actions/deploy-pages@v4
+      id: deployment
