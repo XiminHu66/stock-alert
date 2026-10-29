@@ -19,10 +19,12 @@ jobs:
       uses: actions/checkout@v4
     - name: Configure Pages
       uses: actions/configure-pages@v5
+    - name: Prepare frontend-only client
+      run: python3 .github/scripts/build_static_client.py
     - name: Upload site
       uses: actions/upload-pages-artifact@v3
       with:
-        path: .
+        path: _site
         retention-days: 1
     - name: Deploy
       id: deployment

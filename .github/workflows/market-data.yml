@@ -26,9 +26,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: actions/configure-pages@v5
+    - name: Prepare frontend-only client
+      run: python3 .github/scripts/build_static_client.py
     - uses: actions/upload-pages-artifact@v3
       with:
-        path: .
+        path: _site
         retention-days: 1
     - uses: actions/deploy-pages@v4
       id: deployment
